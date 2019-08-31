@@ -16,18 +16,21 @@ class GAN(ABC):
     
         
     def __init__(self,x_ph,g_net_shape,d_net_shape,batch_size,conv=False,sess=None,ac_fn=tf.nn.relu,\
-                batch_norm=False,learning_rate=0.001,op_type='adam',clip=None,reg=None,g_penalty=False,\
-                gamma0=1.,alpha=0.01,pooling=False,*args,**kargs):
+                batch_norm=False,learning_rate=0.0002,op_type='adam',clip=None,reg=None,g_penalty=False,\
+                gamma0=1.,alpha=0.01,pooling=False,strides={},*args,**kargs):
         print('x ph',x_ph,'batch size',batch_size)
         self.conv = conv
+        print('conv', conv)
         self.batch_norm = batch_norm
         self.pooling = pooling
+        print('pooling', pooling)
         self.ac_fn = ac_fn
         self.g_net_shape = g_net_shape
         self.d_net_shape = d_net_shape
         self.batch_size = batch_size
         self.g_penalty = g_penalty
         print('g penalty',g_penalty)
+        self.strides = strides
         if g_penalty:
             print('enable discriminator regularizer')
             self.gamma0 = gamma0
@@ -37,25 +40,34 @@ class GAN(ABC):
                 self.gamma = tf.placeholder(dtype=tf.float32,shape=[], name='d_reg_gamma')
             else:
                 self.gamma = gamma0
-
-        self.define_model(x_ph,g_net_shape,d_net_shape,batch_size,conv,ac_fn,batch_norm,learning_rate,op_type,clip,reg,pooling,*args,**kargs)
+      
+        self.define_model(x_ph,g_net_shape,d_net_shape,batch_size,conv,ac_fn,batch_norm,learning_rate,\
+                            op_type,clip,reg,pooling,strides,*args,**kargs)
         if sess is None:
             self.sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
         else:
             self.sess = sess
 
     
-    def define_model(self,x_ph,g_net_shape,d_net_shape,batch_size,conv,ac_fn,batch_norm,learning_rate,op_type,clip=None,reg=None,pooling=False,*args,**kargs):
+    def define_model(self,x_ph,g_net_shape,d_net_shape,batch_size,conv,ac_fn,batch_norm,learning_rate,\
+                        op_type,clip=None,reg=None,pooling=False,strides={},*args,**kargs):
         
         self.is_training = tf.placeholder(dtype=tf.bool,shape=[]) if batch_norm else None
         self.x_ph = x_ph # true data
         k = g_net_shape[0][0] if conv else g_net_shape[0]   
         print('check e ph',batch_size,'k',k)    
         self.e_ph = tf.placeholder(dtype=tf.float32,shape=[batch_size,k])      
-
-        self.g_W,self.g_B,self.g_H = self.define_g_net(self.e_ph,g_net_shape,reuse=False,conv=conv,ac_fn=ac_fn,batch_norm=batch_norm,training=self.is_training,reg=reg,pooling=pooling)
-        self.d_W,self.d_B,self.d_H = self.define_d_net(self.x_ph,d_net_shape,reuse=False,conv=conv,ac_fn=ac_fn,batch_norm=batch_norm,training=self.is_training,reg=reg,pooling=pooling)
-        _,__,self.d_fake_H = self.define_d_net(self.g_H[-1],d_net_shape,reuse=True,conv=conv,ac_fn=ac_fn,batch_norm=batch_norm,training=self.is_training,reg=reg,pooling=pooling)
+        #print('strides',strides)
+        g_strides, d_strides = strides.get('generator',[]), strides.get('discriminator',[])
+        self.g_W,self.g_B,self.g_H = self.define_g_net(self.e_ph,g_net_shape,reuse=False,conv=conv,ac_fn=ac_fn,\
+                                                        batch_norm=batch_norm,training=self.is_training,\
+                                                        reg=reg,pooling=pooling,strides=g_strides)
+        self.d_W,self.d_B,self.d_H = self.define_d_net(self.x_ph,d_net_shape,reuse=False,conv=conv,ac_fn=ac_fn,\
+                                                        batch_norm=batch_norm,training=self.is_training,\
+                                                        reg=reg,pooling=pooling,strides=d_strides)
+        _,__,self.d_fake_H = self.define_d_net(self.g_H[-1],d_net_shape,reuse=True,conv=conv,ac_fn=ac_fn,\
+                                                batch_norm=batch_norm,training=self.is_training,\
+                                                reg=reg,pooling=pooling,strides=d_strides)
         
         self.g_loss,self.d_loss = self.set_loss()
         self.g_train,self.g_var_list,self.g_opt = self.config_train(self.g_loss,scope='generator',learning_rate=learning_rate*5,clip=clip)
@@ -65,7 +77,8 @@ class GAN(ABC):
 
 
     @staticmethod
-    def define_g_net(e,net_shape,reuse,conv=False,ac_fn=tf.nn.relu,batch_norm=False,training=None,reg=None,output_ac=tf.nn.sigmoid,scope = 'generator',pooling=False):
+    def define_g_net(e,net_shape,reuse,conv=False,ac_fn=tf.nn.relu,batch_norm=False,training=None,reg=None,\
+                    output_ac=tf.nn.sigmoid,scope = 'generator',pooling=False,strides=[]):
         W,B,H = [],[],[]
         h = e
         dense_net_shape = net_shape[0] if conv else net_shape
@@ -85,7 +98,7 @@ class GAN(ABC):
                 #print(l,w,b)
                 H.append(h)    
             if conv:
-                h = tf.reshape(h,[-1]+net_shape[1][0]) # net_shape[1][] is a list of output shape of dconv2d
+                h = tf.reshape(h,[-1]+net_shape[1][0]) # net_shape[1][] is a list of input and filter shape of dconv2d
                 for l in range(1,len(net_shape[1])):
                     l_batch_norm = False
                     # set batch norm every 2 layers, starting from first layer
@@ -95,11 +108,16 @@ class GAN(ABC):
                     if l == len(net_shape[1])-1:
                         ac_fn = output_ac
                         l_batch_norm = False
-                    output_shape = [h.shape[0].value]+net_shape[1][l]
-                    filter_shape = [4,4,net_shape[1][l][-1],net_shape[1][l-1][-1]]
+
+                    filter_shape = net_shape[1][l]
+                    print('input shape',h.shape)
+                    strd = strides[l-1] if strides else [1,2,2,1]
+                    print('strides',strd)
+                    ow, oh = int(h.shape[1].value*strd[1]), int(h.shape[2].value*strd[2]) #stride (2,2)
+                    output_shape = [h.shape[0].value,ow,oh,filter_shape[2]]
                     print('output shape',output_shape,'filter shape',filter_shape)
-                    w,b,h = build_conv_bn_acfn(h,l,filter_shape,initialization={'w':tf.truncated_normal_initializer(stddev=0.02),'b':tf.constant_initializer(0.0)},\
-                                ac_fn=ac_fn,deconv=True,output_shape=output_shape,batch_norm=l_batch_norm,training=training,scope=scope,reg=reg)
+                    w,b,h = build_conv_bn_acfn(h,l,filter_shape,strides=strd,initialization={'w':tf.truncated_normal_initializer(stddev=0.02),'b':tf.constant_initializer(0.0)},\
+                                                ac_fn=ac_fn,deconv=True,output_shape=output_shape,batch_norm=l_batch_norm,training=training,scope=scope,reg=reg)
                     if pooling:
                         h = tf.nn.max_pool(value=h,ksize=[1,2,2,1],strides=[1,1,1,1],padding='SAME')
                     
@@ -110,7 +128,8 @@ class GAN(ABC):
         return W,B,H
 
     @staticmethod
-    def define_d_net(x,net_shape,reuse,conv=False,ac_fn=tf.nn.relu,batch_norm=False,training=None,reg=None,scope = 'discriminator',pooling=False):
+    def define_d_net(x,net_shape,reuse,conv=False,ac_fn=tf.nn.relu,batch_norm=False,training=None,reg=None,\
+                        scope = 'discriminator',pooling=False,strides=[]):
         W,B,H = [],[],[]        
         h = x
         dense_net_shape = net_shape[1] if conv else net_shape
@@ -121,13 +140,15 @@ class GAN(ABC):
                 for l in range(len(net_shape[0])):                    
                     filter_shape = net_shape[0][l]
                     print('filter shape',filter_shape)
-                    
+                    strd = strides[l] if strides else [1,2,2,1]
+                    print('strides',strd)
                     # set batch norm every 2 layers, starting from second layer
                     l_batch_norm = False
                     if batch_norm and (l+1)%2 == 0:
                         l_batch_norm = True
-                    w,b,h = build_conv_bn_acfn(h,l,filter_shape,initialization={'w':tf.random_normal_initializer(stddev=0.02),'b':tf.constant_initializer(0.0)},\
-                                            ac_fn=ac_fn,batch_norm=l_batch_norm,training=training,scope=scope,reg=reg)
+                    w,b,h = build_conv_bn_acfn(h,l,filter_shape,strides=strd,initialization={'w':tf.random_normal_initializer(stddev=0.02),'b':tf.constant_initializer(0.0)},\
+                                                ac_fn=ac_fn,batch_norm=l_batch_norm,training=training,scope=scope,reg=reg)
+                    print('output shape',h.shape)
                     if pooling:
                         h = tf.nn.max_pool(value=h,ksize=[1,2,2,1],strides=[1,1,1,1],padding='SAME')
 
@@ -154,7 +175,7 @@ class GAN(ABC):
 
 
     @staticmethod
-    def restore_d_net(x,W,B,conv_L=0,ac_fn=tf.nn.relu,batch_norm=False,training=None,scope=''):
+    def restore_d_net(x,W,B,conv_L=0,ac_fn=tf.nn.relu,batch_norm=False,training=None,scope='',strides=[]):
         h = x
         H = []
         # including conv layers
@@ -164,7 +185,8 @@ class GAN(ABC):
                 l_batch_norm = False
                 if batch_norm and (l+1)%2 == 0:
                     l_batch_norm = True
-                h = restore_conv_layer(h,l,conv_W[l],conv_B[l],ac_fn=ac_fn,\
+                strd = strides[l] if strides else [1,2,2,1]
+                h = restore_conv_layer(h,l,conv_W[l],conv_B[l],strides=strd,ac_fn=ac_fn,\
                                         batch_norm=l_batch_norm,training=training,scope=scope)
                 H.append(h)
             h = tf.reshape(h,[h.shape[0].value,-1])
@@ -179,7 +201,7 @@ class GAN(ABC):
  
 
     @staticmethod
-    def restore_g_net(e,W,B,conv_L=0,ac_fn=tf.nn.relu,batch_norm=False,training=None,scope=''):
+    def restore_g_net(e,W,B,conv_L=0,ac_fn=tf.nn.relu,batch_norm=False,training=None,scope='',strides=[]):
         h = e
         H = []
         print('e shape',e.shape)
@@ -210,9 +232,10 @@ class GAN(ABC):
                 if l == conv_L-1:
                     ac_fn = tf.nn.sigmoid
                     l_batch_norm = False
-                k*=2
-                output_shape = [h.shape[0].value, k,k, w.shape[-2]]               
-                h = restore_conv_layer(h,l,w,b,ac_fn=ac_fn,deconv=True,output_shape=output_shape,\
+                strd = strides[l] if strides else [1,2,2,1]
+                ow, oh = h.shape[1].value * strd[1], h.shape[2].value * strd[2]
+                output_shape = [h.shape[0].value, ow, oh, w.shape[-2]]               
+                h = restore_conv_layer(h,l,w,b,strides=strd,ac_fn=ac_fn,deconv=True,output_shape=output_shape,\
                                         batch_norm=l_batch_norm,training=training,scope=scope)
                 H.append(h)
         return H
@@ -340,7 +363,7 @@ class GAN(ABC):
                     x_samples = self.generator(e_samples)
                     ng = int(np.sqrt(batch_size))
                     fig = plot(x_samples[:ng*ng],shape=[ng,ng])
-                    fig.savefig(result_path+'e'+str(e+1)+'.pdf')
+                    fig.savefig(os.path.join(result_path,'e'+str(e+1)+'.pdf'))
                     plt.close()
 
 
@@ -352,7 +375,7 @@ class WGAN(GAN):
     def __init__(self,x_ph,g_net_shape,d_net_shape,batch_size,conv=False,sess=None,ac_fn=tf.nn.relu,\
                 batch_norm=False,learning_rate=0.0002,op_type='adam',clip=None,reg=None,*args,**kargs):
         super(WGAN,self).__init__(x_ph,g_net_shape,d_net_shape,batch_size,conv,sess,\
-                                    ac_fn,batch_norm,learning_rate,op_type,clip,reg)
+                                    ac_fn,batch_norm,learning_rate,op_type,clip,reg,*args,**kargs)
         self.clip_D = [p.assign(tf.clip_by_value(p, -0.01, 0.01)) for p in self.d_var_list]
         return
 
@@ -380,7 +403,7 @@ class WGAN_GP(WGAN):
 
         self.lambd = lambd
         super(WGAN_GP,self).__init__(x_ph,g_net_shape,d_net_shape,batch_size,conv,sess,ac_fn,\
-                batch_norm,learning_rate,op_type,clip,reg)
+                batch_norm,learning_rate,op_type,clip,reg,*args,**kargs)
         return
 
 
@@ -415,7 +438,7 @@ class fGAN(GAN):
 
         print('x_ph',x_ph)
         super(fGAN,self).__init__(x_ph,g_net_shape,d_net_shape,batch_size,conv,sess,ac_fn,batch_norm,\
-                                learning_rate,op_type,clip,reg,g_penalty,gamma0,alpha)
+                                learning_rate,op_type,clip,reg,g_penalty,gamma0,alpha,*args,**kargs)
         
         return
 
@@ -525,37 +548,7 @@ class fGAN(GAN):
 
         return idf_gf
 
-    '''
-    def Discriminator_Regularizer(self,d_fake_h,d_fake_x,batch_size,ac_fn):
-
-        grad_d_fake = tf.gradients(ac_fn(d_fake_h), d_fake_x)[0]
-        grad_d_fake_norm = tf.norm(tf.reshape(grad_d_fake, [batch_size,-1]), axis=1, keep_dims=True)
-
-        #set keep_dims=True/False such that grad_D_logits_norm.shape == D.shape
-        assert grad_d_fake_norm.shape == d_fake_h.shape
-
-        if self.divergence == 'KL':
-            def conjfd2_acf(v):
-                return tf.exp(v-1.)
-        elif self.divergence == 'rv_KL':
-            def conjfd2_acf(v):
-                return tf.exp(2. * v)
-        elif self.divergence == 'Pearson':
-            def conjfd2_acf(v):
-                return 0.5
-        elif self.divergence == 'Hellinger':
-            def conjfd2_acf(v):
-                return tf.divide(2.,tf.pow(tf.exp(-v)-2.,3))
-        elif self.divergence == 'Jensen_Shannon':
-            def conjfd2_acf(v):
-                return tf.exp(v)*(1.+tf.exp(v))
-        else:
-            raise NotImplementedError('Divergence not supported!')
-
-        reg_d_fake = tf.multiply(conjfd2_acf(d_fake_h), tf.square(grad_d_fake_norm))
-        disc_regularizer = tf.reduce_mean(reg_d_fake)
-        return disc_regularizer
-    '''
+    
     def set_loss(self,d_h=None,d_fakeh=None):
         if d_h is None:
             d_h = self.d_H[-1] 

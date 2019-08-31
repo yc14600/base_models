@@ -33,7 +33,7 @@ class VAE(object):
 
     def __init__(self,x_dim,z_dim,batch_size,e_net_shape,d_net_shape,sess=None,train_size=10000,noise_std=0.1,\
                     epochs=50, print_e=20, learning_rate=0.001,conv=False,scope='vae',\
-                    reg=None,lamb_reg=0.001,prior_std=.1,*args,**kargs):
+                    reg=None,lamb_reg=0.001,prior_std=1.,*args,**kargs):
 
         self.x_dim = x_dim
         self.z_dim = z_dim
@@ -134,10 +134,11 @@ class VAE(object):
         rlt = np.zeros([x.shape[0],self.x_dim])
         for i in range(iters):
             start = ii
-            x_batch,_,ii = get_next_batch(x,self.batch_size,ii)
+            x_batch,_,ii = get_next_batch(x,self.batch_size,ii,repeat=False)
             end = ii if ii < x.shape[0] and ii > start else x.shape[0]
             feed_dict = {self.x_ph:x_batch}
-            rlt[start:end] = self.sess.run(self.qx,feed_dict)[:end-start]
+            print('start',start,'end',end)
+            rlt[start:end] = self.sess.run(self.rec_x,feed_dict)[:end-start]
         return rlt
 
     
