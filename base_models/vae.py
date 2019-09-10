@@ -16,7 +16,7 @@ from edward.models import Normal,TransformedDistribution,Gamma
 
 from utils.train_util import *
 from utils.model_util import *
-from hsvi.hsvi import Hierarchy_SVI
+from hsvi import Hierarchy_SVI
 from base_models.gans import GAN
 
 from tensorflow.contrib import slim
@@ -142,12 +142,13 @@ class VAE(object):
         return rlt
 
     
-    def train(self,X):
+    def train(self,X,warm_start=False):
         
         with self.sess.as_default():
-       
-            tf.global_variables_initializer().run()
-            
+            if not warm_start:
+                #tf.global_variables_initializer().run()
+                reinitialize_scope(self.scope,self.sess)
+
             ii = 0
             num_iters = int(np.ceil(X.shape[0]/self.batch_size))
 
