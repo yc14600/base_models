@@ -561,7 +561,7 @@ class fGAN(GAN):
             d_fakeh = self.d_fake_H[-1]
 
         act_fn,conj_f = self.get_act_conj_fn(self.divergence)
-        idf_gf = self.get_idf_gf(self.divergence)
+        #idf_gf = self.get_idf_gf(self.divergence)
         F = tf.reduce_mean(act_fn(d_h)) + tf.reduce_mean(-conj_f(act_fn(d_fakeh)))
         reg_loss = 0.0001 * tf.reduce_sum(tf.losses.get_regularization_losses())
         #r_constr =  tf.square(tf.reduce_mean(idf_gf(tf.stop_gradient(d_fakeh[-1]))) - 1.) + tf.square(tf.reduce_mean(1./idf_gf(d_h[-1])) - 1.)
