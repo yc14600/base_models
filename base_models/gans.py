@@ -670,13 +670,13 @@ class CGAN(GAN):
         reg_d_fake = tf.multiply(tf.square(d_fake), tf.square(grad_df_logits_norm))
         disc_regularizer = tf.reduce_mean(reg_d_real + reg_d_fake)
         return disc_regularizer
-        
+
 
     def discriminator(self,x,y,*args,**kargs):
         rt = np.zeros(x.shape[0])
         iters = np.ceil(x/self.batch_size).astype(int)
         ii = 0
-        X = concat_cond_data(x,y,one_hot=True,dim=self.c_dim,conv=self.conv)
+        X = concat_cond_data(x,y,one_hot=False,dim=self.c_dim,conv=self.conv)
         for _ in range(iters):
             start = ii
             feed_dict = {} if self.is_training is None else {self.is_training:False}
