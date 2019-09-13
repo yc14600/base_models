@@ -683,7 +683,7 @@ class CGAN(GAN):
             x_batch,__,ii = get_next_batch(X,self.batch_size,ii)
             feed_dict.update({self.x_ph:x_batch})
             end = ii if ii > start else x.shape[0]
-            rt[start:end] = self.sess.run(self.d_H[-1],feed_dict=feed_dict).reshape(-1)
+            rt[start:end] = self.sess.run(self.d_H[-1],feed_dict=feed_dict).reshape(-1)[:end-start]
         return rt
 
 
