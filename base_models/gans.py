@@ -8,7 +8,7 @@ import six
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
-from utils.train_util import config_optimizer,get_var_list,plot,concat_cond_data,shuffle_data
+from utils.train_util import config_optimizer,get_vars_by_scope,plot,concat_cond_data,shuffle_data
 from utils.model_util import *
 
 
