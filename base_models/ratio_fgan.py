@@ -7,7 +7,7 @@ import scipy as sp
 import six
 import tensorflow as tf
 from abc import ABC, abstractmethod
-from utils.train_util import config_optimizer,get_var_list,plot
+from utils.train_util import config_optimizer,plot
 import matplotlib.pyplot as plt
 from utils.model_util import *
 from base_models.gans import fGAN,GAN

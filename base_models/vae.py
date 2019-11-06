@@ -32,8 +32,8 @@ ds = tf.contrib.distributions
 class VAE(object):
 
     def __init__(self,x_dim,z_dim,batch_size,e_net_shape,d_net_shape,sess=None,train_size=10000,noise_std=0.1,\
-                    epochs=50, print_e=20, learning_rate=0.001,conv=False,scope='vae',\
-                    reg=None,lamb_reg=0.001,prior_std=1.,*args,**kargs):
+                    epochs=50, print_e=20, learning_rate=0.001,conv=False,scope='vae',reg=None,lamb_reg=0.001,\
+                    prior_std=1.,bayes=False,ac_fn=tf.nn.relu,output_ac=tf.nn.sigmoid,*args,**kargs):
 
         self.x_dim = x_dim
         self.z_dim = z_dim
@@ -46,6 +46,9 @@ class VAE(object):
         self.reg = reg
         self.lamb_reg = lamb_reg
         self.prior_std = prior_std
+        self.bayes = bayes
+        self.ac_fn = ac_fn
+        self.output_ac = output_ac
         if sess is None:
             self.sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
         else:
@@ -64,6 +67,10 @@ class VAE(object):
         self.pz = Normal(loc=tf.zeros([z_dim]),scale=tf.ones([z_dim])*self.prior_std,sample_shape=[batch_size])
         #self.noise_p_prior = Gamma(1.,.01)
 
+        if self.bayes and not self.conv:
+            e_net_shape = x_dim + e_net_shape + [z_dim]
+            d_net_shape = [z_dim] + d_net_shape + x_dim
+
         with tf.variable_scope(self.scope):
         
             self.z_mu, self.z_sigma = self.encoder(self.x_ph,e_net_shape,scope='encoder')
@@ -79,7 +86,16 @@ class VAE(object):
     
 
     def config_inference(self,opt,train_size):
-        self.inference = Hierarchy_SVI(latent_vars={self.scope:{self.pz:self.qz}},data={self.scope:{self.qx:self.x_ph}})
+        latent_vars={self.scope:{self.pz:self.qz}}
+        prior = Normal(loc=0.,scale=1e-2)
+        if self.bayes:
+            for qw in self.eW+self.eB+self.dW+self.dB:
+                latent_vars[self.scope].update({prior:qw})
+            if self.conv:
+                for qw in self.conv_eW+self.conv_dW:
+                    latent_vars[self.scope].update({prior:qw})
+
+        self.inference = Hierarchy_SVI(latent_vars=latent_vars,data={self.scope:{self.qx:self.x_ph}})
 
         if self.reg is not None:
             reg_loss = tf.reduce_sum(tf.losses.get_regularization_losses()) * self.lamb_reg
@@ -87,20 +103,35 @@ class VAE(object):
         else:
             self.inference.initialize(vi_types={self.scope:'KLqp_analytic'},optimizer={self.scope:opt},train_size=train_size)
 
+    
     def encoder(self,x,net_shape,scope='encoder',reuse=False):
-        if self.conv:
-            self.eW,self.eB,self.eH = GAN.define_d_net(x,net_shape,reuse=reuse,conv=self.conv,\
-                                                    scope=scope,ac_fn=tf.nn.relu,reg=self.reg)  
+        if self.bayes:
+            if self.conv:
+                conv_net_shape = net_shape[0]
+                net_shape = net_shape[1]
+                self.conv_eW,self.conv_parm_var,self.conv_eh = build_bayes_conv_net(x,self.batch_size,conv_net_shape)
+                x = self.conv_eh 
+
+            self.eW,self.eB,self.eH,_,_,_,self.parm_var = build_nets(net_shape,x,bayes=True,ac_fn=self.ac_fn,output_ac=self.output_ac,bayes_output=False)
+            
             with tf.variable_scope(scope,reuse=reuse):
-                #print('shape check',self.eH[-1].shape,net_shape[-1][-2])
-                self.sigma_w,self.sigma_b,z_sigma = build_dense_layer(tf.layers.flatten(self.eH[-2]),len(net_shape[-1])+1,net_shape[-1][-2],self.z_dim,\
-                                                                    ac_fn=tf.nn.softplus,reg=self.reg)
+                    self.sigma_w,self.sigma_b,z_sigma,_,sigma_var = build_dense_layer(self.eH[-2],len(net_shape),net_shape[-2],self.z_dim,\
+                                                                                    ac_fn=tf.nn.softplus,reg=self.reg,bayes=True)
+                    self.parm_var.update(sigma_var)    
+                
         else:
-            self.eW,self.eB,self.eH = GAN.define_d_net(x,[self.x_dim]+net_shape+[self.z_dim],reuse=reuse,conv=self.conv,\
-                                                        scope=scope,ac_fn=tf.nn.relu,reg=self.reg)  
-            with tf.variable_scope(scope,reuse=reuse):
-                self.sigma_w,self.sigma_b,z_sigma = build_dense_layer(self.eH[-2],len(net_shape)+2,net_shape[-1],self.z_dim,\
-                                                                        ac_fn=tf.nn.softplus,reg=self.reg)    
+            if self.conv:
+                self.eW,self.eB,self.eH = GAN.define_d_net(x,net_shape,reuse=reuse,conv=self.conv,scope=scope,ac_fn=tf.nn.relu,reg=self.reg)  
+                with tf.variable_scope(scope,reuse=reuse):
+                    #print('shape check',self.eH[-1].shape,net_shape[-1][-2])
+                    self.sigma_w,self.sigma_b,z_sigma = build_dense_layer(tf.layers.flatten(self.eH[-2]),len(net_shape[-1])+1,net_shape[-1][-2],self.z_dim,\
+                                                                        ac_fn=tf.nn.softplus,reg=self.reg)
+            else:
+                self.eW,self.eB,self.eH = GAN.define_d_net(x,[self.x_dim]+net_shape+[self.z_dim],reuse=reuse,conv=self.conv,\
+                                                            scope=scope,ac_fn=self.ac_fn,reg=self.reg)  
+                with tf.variable_scope(scope,reuse=reuse):
+                    self.sigma_w,self.sigma_b,z_sigma = build_dense_layer(self.eH[-2],len(net_shape)+2,net_shape[-1],self.z_dim,\
+                                                                            ac_fn=tf.nn.softplus,reg=self.reg)    
 
         return self.eH[-1],z_sigma
 
@@ -121,10 +152,23 @@ class VAE(object):
 
     
     def decoder(self,z,net_shape,scope='decoder',reuse=False):
-        if self.conv:
-            self.dW,self.dB,self.dH = GAN.define_g_net(z,net_shape,reuse=reuse,conv=self.conv,scope=scope,reg=self.reg) 
+        if self.bayes:
+            if self.conv:
+                conv_net_shape = net_shape[1]
+                net_shape = net_shape[0]
+            self.dW,self.dB,self.dH,_,_,_,d_parm_var = build_nets(net_shape,z,bayes=True,ac_fn=self.ac_fn,\
+                                                                    output_ac=tf.nn.sigmoid,bayes_output=False)
+            self.parm_var.update(d_parm_var)
+            if self.conv:
+                self.conv_dW,conv_parm_var,conv_dh = build_bayes_conv_net(self.dH[-1],self.batch_size,conv_net_shape)
+                self.dH.append(conv_dh)
+                self.conv_parm_var.update(conv_parm_var)
+
         else:
-            self.dW,self.dB,self.dH = GAN.define_g_net(z,[self.z_dim]+net_shape+[self.x_dim],reuse=reuse,conv=self.conv,scope=scope,reg=self.reg) 
+            if self.conv:
+                self.dW,self.dB,self.dH = GAN.define_g_net(z,net_shape,reuse=reuse,conv=self.conv,scope=scope,reg=self.reg) 
+            else:
+                self.dW,self.dB,self.dH = GAN.define_g_net(z,[self.z_dim]+net_shape+[self.x_dim],reuse=reuse,conv=self.conv,scope=scope,reg=self.reg) 
         return self.dH[-1]   
 
     
@@ -142,12 +186,14 @@ class VAE(object):
         return rlt
 
     
-    def train(self,X,warm_start=False):
+    def train(self,X,warm_start=False,standalone=True):
         
         with self.sess.as_default():
             if not warm_start:
-                #tf.global_variables_initializer().run()
-                reinitialize_scope(self.scope,self.sess)
+                if standalone:
+                    tf.global_variables_initializer().run()
+                else:
+                    reinitialize_scope(self.scope,self.sess)
 
             ii = 0
             num_iters = int(np.ceil(X.shape[0]/self.batch_size))
@@ -164,15 +210,38 @@ class VAE(object):
 
 
     def save_params(self):
-        # save encoder params
-        self.prev_eW,self.prev_eB = self.sess.run([self.eW,self.eB]) 
-        self.prev_eH = GAN.restore_d_net(self.x_ph,self.prev_eW,self.prev_eB) 
-        self.prev_sigma_w,self.prev_sigma_b = self.sess.run([self.sigma_w,self.sigma_b])
-        self.prev_z_sigma = restore_dense_layer(self.prev_eH[-2],len(self.prev_eW)+1,self.prev_sigma_w,self.prev_sigma_b,ac_fn=tf.nn.softplus)          
-        self.prev_qz = Normal(loc=self.prev_eH[-1],scale=self.prev_z_sigma)
-        # save decoder params
-        self.prev_dW,self.prev_dB = self.sess.run([self.dW,self.dB])
-        self.prev_dH = GAN.restore_g_net(self.prev_qz,self.prev_dW,self.prev_dB)
+        sess = self.sess
+        if self.bayes:
+            self.prev_eW, self.prev_eB, self.prev_dW, self.prev_dB = [], [], [], []
+            for w,b in zip(self.eW,self.eB):
+                self.prev_eW.append(Normal(loc=sess.run(w.loc),scale=sess.run(w.scale)))
+                self.prev_eB.append(Normal(loc=sess.run(b.loc),scale=sess.run(b.scale)))
+            
+            self.prev_eH = forward_mean_nets(self.prev_eW,self.prev_eB,self.x_ph,ac_fn=self.ac_fn,sess=self.sess,output_ac=self.output_ac)
+            self.prev_sigma_w = Normal(loc=sess.run(self.sigma_w.loc),scale=sess.run(self.sigma_w.scale))
+            self.prev_sigma_b = Normal(loc=sess.run(self.sigma_b.loc),scale=sess.run(self.sigma_b.scale))
+            
+            self.prev_z_sigma = restore_dense_layer(self.prev_eH[-2],len(self.prev_eW)+1,self.prev_sigma_w,self.prev_sigma_b,ac_fn=tf.nn.softplus,bayes=True)          
+            self.prev_qz = Normal(loc=self.prev_eH[-1],scale=self.prev_z_sigma)
+
+            for w,b in zip(self.dW,self.dB):
+                self.prev_dW.append(Normal(loc=sess.run(w.loc),scale=sess.run(w.scale)))
+                self.prev_dB.append(Normal(loc=sess.run(b.loc),scale=sess.run(b.scale)))
+
+            self.prev_dH = forward_mean_nets(self.prev_dW,self.prev_dB,self.prev_qz,ac_fn=self.ac_fn,sess=self.sess,output_ac=tf.nn.sigmoid)
+
+        else:
+            # save encoder params
+            self.prev_eW,self.prev_eB = self.sess.run([self.eW,self.eB]) 
+            self.prev_eH = GAN.restore_d_net(self.x_ph,self.prev_eW,self.prev_eB) 
+            self.prev_sigma_w,self.prev_sigma_b = self.sess.run([self.sigma_w,self.sigma_b])
+        
+            self.prev_z_sigma = restore_dense_layer(self.prev_eH[-2],len(self.prev_eW)+1,self.prev_sigma_w,self.prev_sigma_b,ac_fn=tf.nn.softplus)          
+            self.prev_qz = Normal(loc=self.prev_eH[-1],scale=self.prev_z_sigma)
+            # save decoder params
+            self.prev_dW,self.prev_dB = self.sess.run([self.dW,self.dB])
+            self.prev_dH = GAN.restore_g_net(self.prev_qz,self.prev_dW,self.prev_dB)
+        
         self.prev_qx = Normal(loc=self.prev_dH[-1],scale=self.noise_std)
 
     
