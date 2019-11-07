@@ -211,7 +211,7 @@ class VAE(object):
 
     def save_params(self):
         sess = self.sess
-        fix_std = 1e-6
+        fix_std = 1e-3
         if self.bayes:
             self.prev_eW, self.prev_eB, self.prev_dW, self.prev_dB = [], [], [], []
             for w,b in zip(self.eW,self.eB):
