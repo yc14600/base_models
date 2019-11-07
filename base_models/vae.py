@@ -211,22 +211,25 @@ class VAE(object):
 
     def save_params(self):
         sess = self.sess
+        fix_std = 1e-6
         if self.bayes:
             self.prev_eW, self.prev_eB, self.prev_dW, self.prev_dB = [], [], [], []
             for w,b in zip(self.eW,self.eB):
-                self.prev_eW.append(Normal(loc=sess.run(w.loc),scale=sess.run(w.scale)))
-                self.prev_eB.append(Normal(loc=sess.run(b.loc),scale=sess.run(b.scale)))
-            
+                #self.prev_eW.append(Normal(loc=sess.run(w.loc),scale=sess.run(w.scale)))
+                #self.prev_eB.append(Normal(loc=sess.run(b.loc),scale=sess.run(b.scale)))
+                self.prev_eW.append(Normal(loc=sess.run(w.loc),scale=fix_std))
+                self.prev_eB.append(Normal(loc=sess.run(b.loc),scale=fix_std))
+
             self.prev_eH = forward_mean_nets(self.prev_eW,self.prev_eB,self.x_ph,ac_fn=self.ac_fn,sess=self.sess,output_ac=self.output_ac)
-            self.prev_sigma_w = Normal(loc=sess.run(self.sigma_w.loc),scale=sess.run(self.sigma_w.scale))
-            self.prev_sigma_b = Normal(loc=sess.run(self.sigma_b.loc),scale=sess.run(self.sigma_b.scale))
+            self.prev_sigma_w = Normal(loc=sess.run(self.sigma_w.loc),scale=fix_std)
+            self.prev_sigma_b = Normal(loc=sess.run(self.sigma_b.loc),scale=fix_std)
             
             self.prev_z_sigma = restore_dense_layer(self.prev_eH[-2],len(self.prev_eW)+1,self.prev_sigma_w,self.prev_sigma_b,ac_fn=tf.nn.softplus,bayes=True)          
             self.prev_qz = Normal(loc=self.prev_eH[-1],scale=self.prev_z_sigma)
 
             for w,b in zip(self.dW,self.dB):
-                self.prev_dW.append(Normal(loc=sess.run(w.loc),scale=sess.run(w.scale)))
-                self.prev_dB.append(Normal(loc=sess.run(b.loc),scale=sess.run(b.scale)))
+                self.prev_dW.append(Normal(loc=sess.run(w.loc),scale=fix_std))
+                self.prev_dB.append(Normal(loc=sess.run(b.loc),scale=fix_std))
 
             self.prev_dH = forward_mean_nets(self.prev_dW,self.prev_dB,self.prev_qz,ac_fn=self.ac_fn,sess=self.sess,output_ac=tf.nn.sigmoid)
 
