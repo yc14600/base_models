@@ -203,7 +203,7 @@ class VAE(object):
                     x_batch,_,ii=get_next_batch(X,self.batch_size,ii) 
                     feed_dict = {self.x_ph:x_batch}
 
-                    info_dict = self.inference.update(feed_dict=feed_dict,scope=self.scope)
+                    info_dict = self.inference.update(feed_dict=feed_dict,scope=self.scope,sess=self.sess)
 
                 if (e+1)%self.print_e==0 or (e==0):
                     print(e+1,'loss',info_dict['loss'])
