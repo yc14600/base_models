@@ -133,7 +133,7 @@ class GAN(ABC):
         W,B,H = [],[],[]        
         h = x
         dense_net_shape = net_shape[1] if conv else net_shape
-        print('define discriminator')
+        #print('define discriminator')
         if initialization is None:
             initialization = {'w':tf.truncated_normal_initializer(stddev=0.02),'b':tf.constant_initializer(0.0)}
             if conv:
@@ -143,16 +143,16 @@ class GAN(ABC):
             if conv:
                 for l in range(len(net_shape[0])):                    
                     filter_shape = net_shape[0][l]
-                    print('filter shape',filter_shape)
+                    #print('filter shape',filter_shape)
                     strd = strides[l] if strides else [1,2,2,1]
-                    print('strides',strd)
+                    #print('strides',strd)
                     # set batch norm every 2 layers, starting from second layer
                     l_batch_norm = False
                     if batch_norm and (l+1)%2 == 0:
                         l_batch_norm = True
                     w,b,h = build_conv_bn_acfn(h,l,filter_shape,strides=strd,initialization=initialization,\
                                                 ac_fn=ac_fn,batch_norm=l_batch_norm,training=training,scope=scope,reg=reg)
-                    print('output shape',h.shape)
+                    #print('output shape',h.shape)
                     #if pooling:
                     #    h = tf.nn.max_pool(value=h,ksize=[1,2,2,1],strides=[1,2,2,1],padding='SAME')
 
@@ -166,14 +166,14 @@ class GAN(ABC):
                 W.append(w)
                 B.append(b)
                 H.append(h)  
-                print(l,w,b)
+                #print(l,w,b)
 
             # define output layer without activation function         
             w,b,h = build_dense_layer(h,l+1,dense_net_shape[-2],dense_net_shape[-1],ac_fn=None,batch_norm=False)
             W.append(w)
             B.append(b)
             H.append(h)
-            print(l+1,w,b)
+            #print(l+1,w,b)
         
         return W,B,H
 
@@ -197,7 +197,7 @@ class GAN(ABC):
 
         # restore dense layers
         for l in range(conv_L,len(W)-1):
-            print('restore layer {}: h {}, w {}, b {}'.format(l,h.shape,W[l].shape,B[l].shape))
+            #print('restore layer {}: h {}, w {}, b {}'.format(l,h.shape,W[l].shape,B[l].shape))
             h = restore_dense_layer(h,l,W[l],B[l],ac_fn=ac_fn,batch_norm=batch_norm,training=training,scope=scope)
             H.append(h)
         h = restore_dense_layer(h,len(W)-1,W[-1],B[-1],ac_fn=None,batch_norm=False)
@@ -293,7 +293,7 @@ class GAN(ABC):
     @staticmethod
     def config_train(loss,scope,learning_rate=0.0002,op_type='adam',beta1=0.5,decay=None,clip=None,*args,**kargs):
         
-        var_list = get_var_list(scope)
+        var_list = get_vars_by_scope(scope)
         grads = tf.gradients(loss, var_list)
         if clip is not None:
             grads = [tf.clip_by_value(g, clip[0],clip[1]) for g in grads]
@@ -445,7 +445,7 @@ class fGAN(GAN):
 
         #print('lamb_constr',lamb_constr)
 
-        print('x_ph',x_ph)
+        #print('x_ph',x_ph)
         super(fGAN,self).__init__(x_ph,g_net_shape,d_net_shape,batch_size,conv,sess,ac_fn,batch_norm,\
                                 learning_rate,op_type,clip,reg,g_penalty,gamma0,alpha,*args,**kargs)
         
@@ -606,10 +606,10 @@ class CGAN(GAN):
         self.x_ph = x_ph # true data
         k = g_net_shape[0][0] if conv else g_net_shape[0] 
         c_dim = self.c_dim  
-        print('check e ph',batch_size,'k',k,'c_dim',c_dim)    
+        #print('check e ph',batch_size,'k',k,'c_dim',c_dim)    
         self.e_ph = tf.placeholder(dtype=tf.float32,shape=[batch_size,k]) 
         self.c_ph = tf.placeholder(dtype=tf.float32,shape=[batch_size,c_dim])     
-        print('kargs',**kargs)
+        #print('kargs',**kargs)
         self.g_W,self.g_B,self.g_H = self.define_g_net(self.e_ph,g_net_shape,reuse=False,conv=conv,ac_fn=ac_fn,\
                                                     batch_norm=batch_norm,training=self.is_training,reg=reg,\
                                                     pooling=pooling,**kargs)
@@ -661,11 +661,11 @@ class CGAN(GAN):
         d_fake = tf.nn.sigmoid(d_fake_logits)
         grad_d_real_logits = tf.gradients(d_real_logits, d_real_x)[0]
         grad_d_fake_logits = tf.gradients(d_fake_logits, d_fake_x)[0]
-        print('logits shape',grad_d_fake_logits.shape)
+        #print('logits shape',grad_d_fake_logits.shape)
         grad_dr_logits_norm = tf.norm(tf.reshape(grad_d_real_logits, [batch_size,-1]), axis=1, keep_dims=True)
         grad_df_logits_norm = tf.norm(tf.reshape(grad_d_fake_logits, [batch_size,-1]), axis=1, keep_dims=True)
-        print('logits norm shape',grad_df_logits_norm.shape)
-        print('d_real shape',d_real.shape)
+        #print('logits norm shape',grad_df_logits_norm.shape)
+        #print('d_real shape',d_real.shape)
         #set keep_dims=True/False such that grad_D_logits_norm.shape == D.shape
         assert grad_dr_logits_norm.shape == d_real.shape
         assert grad_df_logits_norm.shape == d_fake.shape
