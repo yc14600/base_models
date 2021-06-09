@@ -2,7 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import edward as ed
+
 import scipy as sp
 import numpy as np
 import pandas as pd
@@ -14,7 +14,7 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from edward.models import Normal,TransformedDistribution,Gamma
+from utils.distributions import Normal,TransformedDistribution,Gamma
 
 from utils.train_util import *
 from utils.model_util import *

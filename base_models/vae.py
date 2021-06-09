@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import edward as ed
 import scipy as sp
 import numpy as np
 import pandas as pd
@@ -12,7 +11,7 @@ import sys
 import os
 import time
 
-from edward.models import Normal,TransformedDistribution,Gamma
+from utils.distributions import Normal
 
 from utils.train_util import *
 from utils.model_util import *
@@ -65,7 +64,6 @@ class VAE(object):
         self.x_ph = tf.placeholder(dtype=tf.float32,shape=[batch_size]+x_dim,name='x_ph')
 
         self.pz = Normal(loc=tf.zeros([z_dim]),scale=tf.ones([z_dim])*self.prior_std,sample_shape=[batch_size])
-        #self.noise_p_prior = Gamma(1.,.01)
 
         if self.bayes and not self.conv:
             e_net_shape = x_dim + e_net_shape + [z_dim]
@@ -78,8 +76,6 @@ class VAE(object):
 
             self.rec_x = self.decoder(self.qz,d_net_shape,scope='decoder')
 
-            #self.q_noise_prc = TransformedDistribution(distribution=Normal(loc=tf.Variable(tf.random_normal([1])), \
-            #                scale=tf.ones([1])),bijector=ds.bijectors.Exp())
 
             self.qx = Normal(loc=self.rec_x,scale=noise_std)    
             self.opt = config_optimizer(learning_rate,'vae_step','adam')
